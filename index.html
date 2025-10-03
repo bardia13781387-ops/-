@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="fa">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ادیتور شبیه Visual Studio - C#</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
+
+  <style>
+    html, body {
+      height:100%;
+      margin:0;
+      font-family: Consolas, 'Courier New', monospace;
+      background:#1e1e1e;
+      color:#ddd;
+      direction:ltr;
+    }
+
+    body {
+      display:flex;
+      flex-direction:column;
+    }
+
+    #topbar {
+      height:40px;
+      background:#333;
+      color:#ccc;
+      display:flex;
+      align-items:center;
+      padding:0 10px;
+      font-size:14px;
+    }
+
+    #topbar span {
+      margin-right:15px;
+      cursor:pointer;
+    }
+
+    #editor {
+      flex:1 1 auto;
+      min-height:400px;
+      border-top:1px solid #444;
+      border-bottom:1px solid #444;
+    }
+
+    #controls {
+      display:flex;
+      gap:10px;
+      padding:8px;
+      background:#252526;
+      border-top:1px solid #444;
+    }
+
+    button {
+      padding:6px 12px;
+      border-radius:4px;
+      border:none;
+      background:#0e639c;
+      color:#fff;
+      cursor:pointer;
+      font-weight:bold;
+      font-size:13px;
+      transition:0.2s;
+    }
+    button:hover { background:#1177bb; }
+
+    #bottom {
+      height:200px;
+      display:flex;
+      border-top:1px solid #444;
+    }
+
+    #stdin {
+      width:30%;
+      border:none;
+      padding:8px;
+      resize:none;
+      outline:none;
+      font-family: Consolas, monospace;
+      font-size:13px;
+      background:#1b1b1b;
+      color:#eee;
+    }
+
+    #output {
+      flex:1;
+      padding:8px;
+      background:#111;
+      color:#e6e6e6;
+      overflow:auto;
+      white-space:pre-wrap;
+      font-family: Consolas, monospace;
+      font-size:13px;
+    }
+
+    #output.error { color:#ff6b6b; }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <span><i class="fas fa-file-code"></i> Program.cs</span>
+  </div>
+
+  <div id="editor"></div>
+
+  <div id="controls">
+    <button id="runBtn"><i class="fas fa-play"></i> اجرا (Ctrl+Enter)</button>
+    <button id="formatBtn"><i class="fas fa-align-left"></i> فرمت</button>
+    <button id="resetBtn"><i class="fas fa-undo"></i> بازنشانی</button>
+  </div>
+
+  <div id="bottom">
+    <textarea id="stdin" placeholder="ورودی‌ها را خط به خط وارد کنید"></textarea>
+    <div id="output">خروجی اینجا نمایش داده می‌شود...</div>
+  </div>
+
+  <script>
+    const JUDGE0_API_URL = 'https://ce.judge0.com/submissions/?base64_encoded=true&wait=true';
+    const JUDGE0_HEADERS = { 'Content-Type': 'application/json' };
+  </script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.33.0/min/vs/loader.js"></script>
+  <script>
+    // کد پیش‌فرض شبیه VS (Hello World)
+    const sample = `using System;
+
+class Program {
+    static void Main() {
+        Console.WriteLine("Hello, World!");
+    }
+}`;
+
+    require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.33.0/min/vs' } });
+    let editor;
+    require(['vs/editor/editor.main'], function() {
+      editor = monaco.editor.create(document.getElementById('editor'), {
+        value: sample,
+        language: 'csharp',
+        automaticLayout: true,
+        theme: 'vs-dark',
+        fontSize: 15,
+        suggestOnTriggerCharacters: true,
+        quickSuggestions: true,
+        wordBasedSuggestions: true,
+      });
+      editor.focus();
+
+      // Ctrl+Enter برای اجرا
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+        document.getElementById('runBtn').click();
+      });
+    });
+
+    function toBase64(str){ return btoa(unescape(encodeURIComponent(str))); }
+    function fromBase64(str){ return decodeURIComponent(escape(atob(str))); }
+
+    async function runViaJudge0(code, stdin){
+      const payload = {
+        source_code: toBase64(code),
+        language_id: 51, // C#
+        stdin: toBase64(stdin || ''),
+      };
+
+      const res = await fetch(JUDGE0_API_URL, {
+        method: 'POST',
+        headers: JUDGE0_HEADERS,
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) throw new Error('خطای سایت: ' + res.status);
+
+      const data = await res.json();
+      let out = '';
+      let errorFlag = false;
+
+      if (data.stdout) out += fromBase64(data.stdout);
+      if (data.stderr) { out += '\\n[خطا] ' + fromBase64(data.stderr); errorFlag = true; }
+      if (data.compile_output) { out += '\\n[کامپایل] ' + fromBase64(data.compile_output); errorFlag = true; }
+      if (out.trim() === '') out = '(بدون خروجی)';
+
+      return { output: out, isError: errorFlag };
+    }
+
+    function showOutput(result){
+      const outEl = document.getElementById('output');
+      outEl.textContent = result.output;
+      if(result.isError){
+        outEl.classList.add('error');
+        outEl.textContent += '\\n\\nراهنما: سینتکس کد را چک کنید یا ورودی مناسب بدهید.';
+      } else {
+        outEl.classList.remove('error');
+      }
+    }
+
+    document.getElementById('runBtn').addEventListener('click', async ()=>{
+      const code = editor.getValue();
+      const stdin = document.getElementById('stdin').value || '';
+      const outEl = document.getElementById('output');
+      outEl.textContent = 'در حال اجرا...';
+      try{
+        const result = await runViaJudge0(code, stdin);
+        showOutput(result);
+      }catch(e){
+        showOutput({ output: e.message, isError:true });
+      }
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', ()=>{
+      editor.setValue(sample);
+      editor.focus();
+    });
+
+    document.getElementById('formatBtn').addEventListener('click', ()=>{
+      const code = editor.getValue();
+      const lines = code.split('\\n').map(l=>l.replace(/\\t/g,'    '));
+      editor.setValue(lines.join('\\n'));
+      editor.focus();
+    });
+
+    window.addEventListener('resize', ()=>{ editor.layout(); });
+  </script>
+</body>
+</html>
