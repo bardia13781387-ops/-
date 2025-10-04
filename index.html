@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="fa">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>ادیتور شبیه Visual Studio - C# (ویژه تایپ بدون جابه‌جایی)</title>
+
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
+
+  <style>
+    :root{
+      --bg:#1e1e1e;
+      --panel:#252526;
+      --muted:#9aa0a6;
+      --accent:#0e639c;
+      --danger:#ff6b6b;
+      --success:#6bcf6b;
+      --editor-font: Consolas, 'Courier New', monospace;
+    }
+
+    html,body{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;background:var(--bg); color:#ddd; -webkit-text-size-adjust:100%;}
+    body{display:flex;flex-direction:column;overflow:hidden} /* prevent full-page scroll; editor handles its own scrolling */
+
+    /* top bar */
+    #topbar{height:46px;background:#2b2b2b;display:flex;align-items:center;gap:12px;padding:0 12px;border-bottom:1px solid #3a3a3a;flex:0 0 46px}
+    #topbar .title{font-weight:600;color:#e6e6e6;}
+    #topbar .controls{margin-left:auto;display:flex;gap:8px;align-items:center}
+    .mini-input{background:#1b1b1b;border:1px solid #333;padding:6px 8px;border-radius:6px;color:#ddd;font-size:13px}
+
+    /* editor container - fills available space */
+    #editorContainer{flex:1 1 auto; display:flex; flex-direction:column; padding:8px; box-sizing:border-box;}
+    #editorWrapper{flex:1 1 auto; border-radius:8px; overflow:hidden; border:1px solid #333; background:#1b1b1b; position:relative;}
+    #editor{width:100%; height:100%; display:block; }
+
+    /* control buttons */
+    #controls{display:flex;gap:8px;padding:10px;margin:8px;background:var(--panel);border-radius:6px;align-items:center;flex:0 0 auto}
+    button.action{background:var(--accent);border:none;color:white;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:600}
+    button.ghost{background:transparent;border:1px solid #3a3a3a;color:#ddd;padding:8px 12px;border-radius:6px;cursor:pointer}
+    button.action:active, button.ghost:active{transform:translateY(1px)}
+    #controls .spacer{flex:1}
+
+    /* bottom panels */
+    #bottom{display:flex;height:220px;margin:8px;gap:8px;flex:0 0 220px}
+    #stdin{width:30%;background:#151515;border-radius:6px;padding:10px;border:1px solid #222;color:#ddd;resize:none;font-family:var(--editor-font);font-size:13px;outline:none}
+    #output{flex:1;background:#0f0f0f;border-radius:6px;padding:10px;border:1px solid #111;color:#e6e6e6;overflow:auto;font-family:var(--editor-font);font-size:13px;white-space:pre-wrap}
+
+    .output-info{color:var(--muted);font-size:12px;margin-bottom:6px}
+    .output-error{color:var(--danger);font-weight:700}
+    .output-warning{color:#ffb86b;font-weight:700}
+    .output-success{color:var(--success);font-weight:700}
+
+    /* status bar */
+    #statusbar{height:28px;background:#232323;color:var(--muted);display:flex;align-items:center;padding:0 10px;font-size:13px;border-top:1px solid #2f2f2f;flex:0 0 28px}
+    #status-left{flex:1}
+    #status-right{color:var(--muted)}
+
+    /* hints */
+    #tips{font-size:12px;color:var(--muted);padding:6px 12px}
+
+    /* responsive */
+    @media (max-width:820px){
+      #editorContainer{padding:4px}
+      #controls{padding:8px;margin:4px}
+      #bottom{flex-direction:column;height:320px}
+      #stdin{width:100%;height:120px}
+      #statusbar{font-size:12px}
+    }
+
+    /* Prevent document scroll (fallback) when editor active - toggled by JS via class on body */
+    body.no-scroll { overflow:hidden; position:fixed; width:100%; }
+
+  </style>
+</head>
+<body>
+
+  <div id="topbar">
+    <div class="title"><i class="fas fa-file-code"></i> Program.cs</div>
+
+    <div class="controls">
+      <label style="color:#cfd6da;font-size:13px">Judge0 endpoint:</label>
+      <input id="endpointInput" class="mini-input" style="width:360px" value="https://ce.judge0.com/submissions/?base64_encoded=true&wait=true" />
+      <label style="color:#cfd6da;font-size:13px">Language ID:</label>
+      <input id="langIdInput" class="mini-input" style="width:80px" value="51" title="Default C# (try 51 or 52 depending on Judge0 instance)" />
+      <button id="saveSettings" class="ghost" title="Save settings">ذخیره</button>
+    </div>
+  </div>
+
+  <div id="editorContainer">
+    <div id="editorWrapper">
+      <div id="editor"></div>
+    </div>
+
+    <div id="controls">
+      <button id="runBtn" class="action"><i class="fas fa-play"></i> اجرا (Ctrl+Enter)</button>
+      <button id="formatBtn" class="ghost"><i class="fas fa-align-left"></i> فرمت</button>
+      <button id="resetBtn" class="ghost"><i class="fas fa-undo"></i> بازنشانی</button>
+      <button id="copyBtn" class="ghost"><i class="fas fa-copy"></i> کپی کد</button>
+      <button id="downloadBtn" class="ghost"><i class="fas fa-download"></i> دانلود</button>
+      <button id="clearOutputBtn" class="ghost"><i class="fas fa-broom"></i> پاک خروجی</button>
+
+      <div class="spacer"></div>
+
+      <div style="color:var(--muted);font-size:13px">میانبرها: <strong>Ctrl+Enter</strong> اجرا — <strong>Ctrl+S</strong> ذخیره</div>
+    </div>
+
+    <div id="bottom">
+      <textarea id="stdin" placeholder="اگر از Console.ReadLine استفاده می‌کنید، اینجا هر ورودی را در یک خط وارد کنید"></textarea>
+      <div id="output"><div class="output-info">خروجی در اینجا نمایش داده می‌شود.</div></div>
+    </div>
+
+  </div>
+
+  <div id="statusbar">
+    <div id="status-left">حالت: آماده</div>
+    <div id="status-right">Ln 1, Col 1</div>
+  </div>
+
+  <div id="tips">نکته: اگر کیبورد موبایل باعث بالا رفتن صفحه شد، سعی کنید نوار آدرس مرورگر را مخفی/پنهان کنید؛ با اینحال این نسخه تلاش می‌کند صفحه را ثابت نگه دارد و همیشه کرسر را وسط کند.</div>
+
+  <!-- Monaco -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.33.0/min/vs/loader.js"></script>
+
+  <script>
+  // ---------------- CONFIG ----------------
+  const sample = `using System;
+
+class Program {
+    static void Main() {
+        Console.WriteLine("Hello, World!");
+    }
+}`;
+  // ----------------------------------------
+
+  // helpers base64
+  function toBase64(str){ return btoa(unescape(encodeURIComponent(str))); }
+  function fromBase64(str){ return decodeURIComponent(escape(atob(str))); }
+
+  // elements
+  const endpointInput = document.getElementById('endpointInput');
+  const langIdInput = document.getElementById('langIdInput');
+  const saveSettings = document.getElementById('saveSettings');
+  const runBtn = document.getElementById('runBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const formatBtn = document.getElementById('formatBtn');
+  const copyBtn = document.getElementById('copyBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const clearOutputBtn = document.getElementById('clearOutputBtn');
+  const stdinEl = document.getElementById('stdin');
+  const outputEl = document.getElementById('output');
+  const statusLeft = document.getElementById('status-left');
+  const statusRight = document.getElementById('status-right');
+  const editorWrapper = document.getElementById('editorWrapper');
+
+  // Monaco setup
+  require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.33.0/min/vs' } });
+  let editor;
+  require(['vs/editor/editor.main'], function() {
+    editor = monaco.editor.create(document.getElementById('editor'), {
+      value: sample,
+      language: 'csharp',
+      automaticLayout: true,
+      theme: 'vs-dark',
+      fontFamily: 'Consolas, monospace',
+      fontSize: 15,
+      minimap: { enabled: false },
+      tabSize: 4,
+      quickSuggestions: { other: true, comments: false, strings: true },
+      suggestOnTriggerCharacters: true,
+      smoothScrolling: true,
+      cursorBlinking: 'blink',
+      renderWhitespace: 'none'
+    });
+
+    // ensure editor layout uses wrapper height (handles mobile keyboard)
+    function layoutEditor() {
+      const rect = editorWrapper.getBoundingClientRect();
+      editor.layout({ width: rect.width, height: rect.height });
+    }
+    layoutEditor();
+    window.addEventListener('resize', layoutEditor);
+
+    // Keep focus and prevent page scroll when editing
+    editor.onDidFocusEditorText(() => {
+      document.body.classList.add('no-scroll'); // prevents body from scrolling
+      statusLeft.textContent = 'حالت: ویرایش';
+    });
+    editor.onDidBlurEditorText(() => {
+      document.body.classList.remove('no-scroll');
+      statusLeft.textContent = 'حالت: آماده';
+    });
+
+    // reveal cursor position in center on move (keeps typed line visible)
+    editor.onDidChangeCursorPosition((e) => {
+      try {
+        // reveal position in center smoothly
+        editor.revealPositionInCenterIfOutside(e.position);
+        // update statusbar
+        const ln = e.position.lineNumber;
+        const col = e.position.column;
+        statusRight.textContent = `Ln ${ln}, Col ${col}`;
+      } catch(err) {
+        // ignore
+      }
+    });
+
+    // Ctrl+Enter run
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      runCode();
+    });
+
+    // Ctrl+S simulate save (prevent default)
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KEY_S, () => {
+      // simple feedback - keep non-blocking
+      statusLeft.textContent = 'فایل ذخیره شد (شبیه‌سازی)';
+      setTimeout(()=> statusLeft.textContent = 'حالت: آماده', 1200);
+    });
+
+    // ensure first focus cursor visible
+    setTimeout(()=> {
+      editor.focus();
+      editor.revealLineInCenter(1);
+    }, 200);
+  });
+
+  // utility: count ReadLine occurrences
+  function countReadLineOccurrences(code){
+    const re = /\bReadLine\s*\(/g;
+    const matches = code.match(re);
+    return matches ? matches.length : 0;
+  }
+
+  // output printer
+  function printOutput(text, type){
+    const div = document.createElement('div');
+    div.textContent = text;
+    if(type === 'error') div.className = 'output-error';
+    else if(type === 'warn') div.className = 'output-warning';
+    else if(type === 'success') div.className = 'output-success';
+    else div.className = 'output-info';
+    outputEl.appendChild(div);
+    outputEl.scrollTop = outputEl.scrollHeight;
+  }
+
+  // clear output
+  clearOutputBtn.addEventListener('click', ()=> {
+    outputEl.innerHTML = '<div class="output-info">خروجی در اینجا نمایش داده می‌شود.</div>';
+  });
+
+  // copy code
+  copyBtn.addEventListener('click', async ()=>{
+    if(!editor) return;
+    const code = editor.getValue();
+    try{
+      await navigator.clipboard.writeText(code);
+      statusLeft.textContent = 'کد کپی شد ✅';
+      setTimeout(()=> statusLeft.textContent = 'حالت: آماده', 900);
+    }catch(e){
+      // fallback
+      const ta = document.createElement('textarea');
+      ta.value = code;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      statusLeft.textContent = 'کپی انجام شد (fallback)';
+      setTimeout(()=> statusLeft.textContent = 'حالت: آماده', 900);
+    }
+  });
+
+  // download code
+  downloadBtn.addEventListener('click', ()=>{
+    if(!editor) return;
+    const code = editor.getValue();
+    const blob = new Blob([code], {type:'text/plain;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Program.cs';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    statusLeft.textContent = 'فایل دانلود شد';
+    setTimeout(()=> statusLeft.textContent = 'حالت: آماده', 900);
+  });
+
+  // reset
+  resetBtn.addEventListener('click', ()=>{
+    if(!editor) return;
+    editor.setValue(sample);
+    stdinEl.value = '';
+    outputEl.innerHTML = '<div class="output-info">خروجی در اینجا نمایش داده می‌شود.</div>';
+    editor.focus();
+  });
+
+  // format (simple)
+  formatBtn.addEventListener('click', ()=>{
+    if(!editor) return;
+    let code = editor.getValue();
+    code = code.replace(/\t/g, '    ').split('\n').map(l=>l.replace(/\s+$/,'')).join('\n');
+    editor.setValue(code);
+    editor.focus();
+  });
+
+  // save settings
+  saveSettings.addEventListener('click', ()=>{
+    localStorage.setItem('judge0_endpoint', endpointInput.value);
+    localStorage.setItem('judge0_langid', langIdInput.value);
+    statusLeft.textContent = 'تنظیمات ذخیره شد';
+    setTimeout(()=> statusLeft.textContent = 'حالت: آماده', 900);
+  });
+
+  // load saved settings
+  (function loadSettings(){
+    const ep = localStorage.getItem('judge0_endpoint');
+    const lid = localStorage.getItem('judge0_langid');
+    if(ep) endpointInput.value = ep;
+    if(lid) langIdInput.value = lid;
+  })();
+
+  // main run function
+  async function runCode(){
+    if(!editor) return;
+    outputEl.innerHTML = '';
+    printOutput('در حال آماده‌سازی اجرا...', 'info');
+
+    const code = editor.getValue();
+    let stdin = stdinEl.value || '';
+
+    // If ReadLine present and stdin empty, fill empty lines so program won't block
+    const readCount = countReadLineOccurrences(code);
+    if(readCount > 0 && stdin.trim() === ''){
+      stdin = Array(readCount).fill('').join('\n');
+      printOutput('(توجه) stdin خالی بود؛ ورودی‌های خالی قرار داده شد تا برنامه منتظر نماند.', 'warn');
+    }
+
+    // prepare payload
+    const endpoint = (endpointInput.value || '').trim() || 'https://ce.judge0.com/submissions/?base64_encoded=true&wait=true';
+    const language_id = parseInt(langIdInput.value) || 51;
+
+    const payload = {
+      source_code: toBase64(code),
+      language_id: language_id,
+      stdin: toBase64(stdin)
+    };
+
+    printOutput('ارسال به سرویس اجرا...', 'info');
+
+    try{
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+
+      if(!res.ok){
+        const txt = await res.text();
+        throw new Error('خطا در اتصال: ' + res.status + ' — ' + txt);
+      }
+
+      const data = await res.json();
+
+      const stdout = data.stdout ? fromBase64(data.stdout) : '';
+      const stderr = data.stderr ? fromBase64(data.stderr) : '';
+      const compile_output = data.compile_output ? fromBase64(data.compile_output) : '';
+
+      if(compile_output && compile_output.trim() !== ''){
+        printOutput('--- خروجی کامپایل ---', 'warn');
+        printOutput(compile_output, 'warn');
+      }
+
+      if(stderr && stderr.trim() !== ''){
+        printOutput('--- خطا (stderr) ---', 'error');
+        printOutput(stderr, 'error');
+      }
+
+      if(stdout && stdout.trim() !== ''){
+        printOutput('--- خروجی (stdout) ---', 'success');
+        printOutput(stdout, 'success');
+      }
+
+      if(!compile_output && !stderr && !stdout){
+        if(data.status && data.status.description){
+          printOutput('وضعیت: ' + data.status.description, 'info');
+        } else {
+          printOutput('(بدون خروجی)', 'info');
+        }
+      }
+
+      if(typeof data.time !== 'undefined' || typeof data.memory !== 'undefined'){
+        let info = '--- اطلاعات اجرا: ';
+        if(typeof data.time !== 'undefined') info += `زمان: ${data.time}s `;
+        if(typeof data.memory !== 'undefined') info += `حافظه: ${data.memory}KB`;
+        printOutput(info, 'info');
+      }
+
+    }catch(err){
+      printOutput('خطا در اجرا: ' + (err.message || err), 'error');
+      console.error(err);
+    }
+  }
+
+  // run button
+  runBtn.addEventListener('click', runCode);
+
+  // global hotkey for Ctrl+Enter
+  window.addEventListener('keydown', (e)=>{
+    if((e.ctrlKey || e.metaKey) && e.key === 'Enter'){
+      e.preventDefault();
+      runCode();
+    }
+  });
+
+  </script>
+</body>
+</html>
